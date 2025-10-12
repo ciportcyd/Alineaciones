@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 
-// Nombres de archivos en /public/jugadores/*.png
+/** Lista de imágenes en /public/jugadores/*.png (mismo nombre) */
 const NAMES = [
   "AITOR","ALVARO","BELOPE","CUESTA","EIZAN","GABI","HIDALGO","IZAN",
   "JASON","JOSE MCO","KAI","LUCA","LUCAS","LUCASP","MARCOS","NASA",
   "PABLO","RAUL","RIOJA ED","ROBER","ROMO","RUBEN","SAUL","SULI","VIGO MC",
 ];
 
-// Todos en casa por defecto (si no hay guardado)
+/** Crea jugadores: por defecto “home” (si no hay guardado) */
 const makePlayers = () =>
   NAMES.map((name, i) => ({
     id: i + 1,
@@ -19,11 +19,22 @@ const makePlayers = () =>
     y: 120,
   }));
 
+/** Plantilla por filas (como en tu foto): 5 filas de arriba a abajo.
+ *  Reparte a TODOS en orden, de izquierda a derecha, en estas filas.
+ *  Si quieres otras cantidades por fila, cambia ROW_COUNTS.
+ */
+const ROW_COUNTS = [5, 5, 5, 5, 4]; // total 24
+const ROW_Y = [0.08, 0.28, 0.48, 0.68, 0.86]; // altura (0..1) de cada fila
+
+// tamaño aprox de tarjeta cuando está en el campo (para centrar)
+const CARD_W = 90;
+const CARD_H = 112;
+
 export default function App() {
   const fieldRef  = useRef(null);
-  const topRef    = useRef(null);   // casa
-  const botRef    = useRef(null);   // banquillo
-  const exportRef = useRef(null);   // contenedor a exportar
+  const topRef    = useRef(null);
+  const botRef    = useRef(null);
+  const exportRef = useRef(null);
 
   const [players, setPlayers] = useState(() => {
     const saved = localStorage.getItem("alineacion-v3");
@@ -34,11 +45,11 @@ export default function App() {
     localStorage.setItem("alineacion-v3", JSON.stringify(players));
   }, [players]);
 
-  // -------- DRAG (pointer events) --------
+  /** DRAG */
   const drag = useRef({ id: null, dx: 0, dy: 0 });
 
   function onPointerDown(e, id) {
-    e.preventDefault(); // arrastre inmediato, sin scroll en paneles
+    e.preventDefault(); // arrastre inmediato
     const p = players.find(x => x.id === id);
     drag.current.id = id;
 
@@ -60,7 +71,6 @@ export default function App() {
     if (target.area !== "field") return;
 
     const rect = fieldRef.current.getBoundingClientRect();
-    const CARD_W = 90, CARD_H = 112;
 
     let x = e.clientX - rect.left - drag.current.dx;
     let y = e.clientY - rect.top  - drag.current.dy;
@@ -83,7 +93,6 @@ export default function App() {
 
     if (inField) {
       const rect = fieldRef.current.getBoundingClientRect();
-      const CARD_W = 90, CARD_H = 112;
       let x = pt.x - rect.left - CARD_W / 2;
       let y = pt.y - rect.top  - CARD_H / 2;
       x = Math.max(0, Math.min(x, rect.width  - CARD_W));
@@ -96,7 +105,6 @@ export default function App() {
     }
   }
 
-  // Detectar soltar aunque termines fuera
   useEffect(() => {
     const up = (e) => finishDrag(e);
     const cancel = () => { drag.current.id = null; };
@@ -118,7 +126,64 @@ export default function App() {
   const onBench = players.filter(p => p.area === "bench");
   const atHome  = players.filter(p => p.area === "home");
 
-  // Exportar PNG con fecha
+  /** 👉 Colocar TODOS en el campo con la distribución por filas (plantilla) */
+  function placeAllToFieldGrid() {
+    if (!fieldRef.current) return;
+    const rect = fieldRef.current.getBoundingClientRect();
+
+    // Márgenes laterales para que no queden pegados al borde
+    const leftMargin = 0.06 * rect.width;
+    const rightMargin = 0.06 * rect.width;
+    const usableWidth = rect.width - leftMargin - rightMargin;
+
+    // Reparte N jugadores por filas según ROW_COUNTS
+    const newPlayers = [...players];
+    let idx = 0;
+
+    ROW_COUNTS.forEach((perRow, rowIndex) => {
+      const y = ROW_Y[rowIndex] * (rect.height - CARD_H);
+      if (perRow <= 0) return;
+
+      // espacios horizontales equidistantes
+      for (let i = 0; i < perRow && idx < newPlayers.length; i++, idx++) {
+        const t = perRow === 1 ? 0.5 : i / (perRow - 1); // 0..1
+        const x = leftMargin + t * usableWidth - CARD_W / 2;
+        newPlayers[idx] = {
+          ...newPlayers[idx],
+          area: "field",
+          x: clamp(x, 0, rect.width - CARD_W),
+          y: clamp(y, 0, rect.height - CARD_H),
+        };
+      }
+    });
+
+    // Si sobran jugadores (más que el total de la plantilla), colócalos al final abajo
+    while (idx < newPlayers.length) {
+      const x = leftMargin + (Math.random() * usableWidth) - CARD_W / 2;
+      const y = 0.92 * (rect.height - CARD_H);
+      newPlayers[idx] = {
+        ...newPlayers[idx],
+        area: "field",
+        x: clamp(x, 0, rect.width - CARD_W),
+        y: clamp(y, 0, rect.height - CARD_H),
+      };
+      idx++;
+    }
+
+    setPlayers(newPlayers);
+  }
+
+  /** Al cargar por primera vez, si no hay guardado, pon plantilla en campo */
+  useEffect(() => {
+    const saved = localStorage.getItem("alineacion-v3");
+    if (!saved) {
+      // Espera a que el campo tenga su tamaño
+      requestAnimationFrame(() => placeAllToFieldGrid());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Exportar PNG con fecha */
   async function exportPNG() {
     const canvas = await html2canvas(exportRef.current, {
       backgroundColor: "#0f0f0f",
@@ -131,21 +196,18 @@ export default function App() {
     link.click();
   }
 
-  // Enviar todos a casa
-  function sendAllHome() {
-    setPlayers(prev => prev.map(p => ({ ...p, area: "home" })));
-  }
-
   return (
-    <div className="w-screen min-h-screen bg-neutral-900 text-white flex flex-col gap-2 p-2" onPointerMove={onPointerMove}>
-
+    <div
+      className="w-screen min-h-screen bg-neutral-900 text-white flex flex-col gap-2 p-2"
+      onPointerMove={onPointerMove}
+    >
       {/* Barra de acciones */}
-      <div className="flex gap-2 justify-end">
+      <div className="flex gap-2 justify-end flex-wrap">
         <button
-          onClick={sendAllHome}
-          className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 rounded-lg text-sm"
+          onClick={placeAllToFieldGrid}
+          className="px-3 py-2 bg-sky-600 hover:bg-sky-500 rounded-lg text-sm font-semibold"
         >
-          🏠 Todos a casa
+          ⚽ Todos al campo (plantilla)
         </button>
         <button
           onClick={exportPNG}
@@ -155,14 +217,14 @@ export default function App() {
         </button>
       </div>
 
-      {/* Contenedor exportable: CASA + CAMPO + BANQUILLO */}
+      {/* Exportable: CASA + CAMPO + BANQUILLO */}
       <div ref={exportRef} className="flex flex-col gap-2">
 
-        {/* 🏠 CASA — SIN SCROLL, todos visibles y arrastre directo */}
+        {/* 🏠 CASA (sin scroll, visible todo) */}
         <section
           ref={topRef}
           className="bg-neutral-800 rounded-xl p-2"
-          style={{ touchAction: 'none' }} // bloquea scroll para permitir drag directo
+          style={{ touchAction: 'none' }}
         >
           <Header title="🏠 En casa" count={atHome.length} />
           <StripGrid players={atHome} onPointerDown={onPointerDown} />
@@ -194,11 +256,11 @@ export default function App() {
           </div>
         </main>
 
-        {/* 🪑 BANQUILLO — SIN SCROLL, todos visibles y arrastre directo */}
+        {/* 🪑 BANQUILLO (sin scroll, visible todo) */}
         <section
           ref={botRef}
           className="bg-neutral-800 rounded-xl p-2"
-          style={{ touchAction: 'none' }} // bloquea scroll para permitir drag directo
+          style={{ touchAction: 'none' }}
         >
           <Header title="🪑 Banquillo" count={onBench.length} />
           <StripGrid players={onBench} onPointerDown={onPointerDown} />
@@ -218,10 +280,8 @@ function Header({ title, count }) {
   );
 }
 
-// Rejilla compacta (mucha densidad) para verlos TODOS sin scroll
+/** Rejilla densa para ver TODOS a la vez */
 function StripGrid({ players, onPointerDown }) {
-  // Mucha densidad horizontal y vertical.
-  // Ajusta w-12 / w-14 si quieres aún más pequeño/grande.
   return (
     <div className="grid grid-cols-7 sm:grid-cols-9 md:grid-cols-10 lg:grid-cols-12 gap-2">
       {players.map(p => (
@@ -246,3 +306,6 @@ function StripGrid({ players, onPointerDown }) {
     </div>
   );
 }
+
+/** Helpers */
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }

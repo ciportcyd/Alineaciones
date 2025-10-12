@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 
-// Nombres de archivos en /public/jugadores/*.png
 const NAMES = [
   "AITOR","ALVARO","BELOPE","CUESTA","EIZAN","GABI","HIDALGO","IZAN",
   "JASON","JOSE MCO","KAI","LUCA","LUCAS","LUCASP","MARCOS","NASA",
   "PABLO","RAUL","RIOJA ED","ROBER","ROMO","RUBEN","SAUL","SULI","VIGO MC",
 ];
 
-// -> todos "home" por defecto
 const makePlayers = () =>
   NAMES.map((name, i) => ({
     id: i + 1,
@@ -21,11 +19,10 @@ const makePlayers = () =>
 
 export default function App() {
   const fieldRef  = useRef(null);
-  const topRef    = useRef(null);   // casa
-  const botRef    = useRef(null);   // banquillo
-  const exportRef = useRef(null);   // contenedor a exportar
+  const topRef    = useRef(null);
+  const botRef    = useRef(null);
+  const exportRef = useRef(null);
 
-  // Si existe guardado, lo respeta. Si no, todos en "home".
   const [players, setPlayers] = useState(() => {
     const saved = localStorage.getItem("alineacion-v3");
     return saved ? JSON.parse(saved) : makePlayers();
@@ -35,7 +32,6 @@ export default function App() {
     localStorage.setItem("alineacion-v3", JSON.stringify(players));
   }, [players]);
 
-  // -------- DRAG (pointer events) --------
   const drag = useRef({ id: null, dx: 0, dy: 0 });
 
   function onPointerDown(e, id) {
@@ -61,7 +57,6 @@ export default function App() {
     if (target.area !== "field") return;
 
     const rect = fieldRef.current.getBoundingClientRect();
-    // tamaños aprox tarjeta en campo (responsive ligero)
     const CARD_W = 90, CARD_H = 112;
 
     let x = e.clientX - rect.left - drag.current.dx;
@@ -119,7 +114,6 @@ export default function App() {
   const onBench = players.filter(p => p.area === "bench");
   const atHome  = players.filter(p => p.area === "home");
 
-  // 📸 Exportar PNG con fecha automática
   async function exportPNG() {
     const canvas = await html2canvas(exportRef.current, {
       backgroundColor: "#0f0f0f",
@@ -132,7 +126,6 @@ export default function App() {
     link.click();
   }
 
-  // Botón opcional: enviar todos "a casa"
   function sendAllHome() {
     setPlayers(prev => prev.map(p => ({ ...p, area: "home" })));
   }
@@ -140,7 +133,7 @@ export default function App() {
   return (
     <div className="w-screen min-h-screen bg-neutral-900 text-white flex flex-col gap-2 p-2">
 
-      {/* Barra de acciones (compacta en móvil) */}
+      {/* Barra de acciones */}
       <div className="flex gap-2 justify-end">
         <button
           onClick={sendAllHome}
@@ -156,20 +149,19 @@ export default function App() {
         </button>
       </div>
 
-      {/* Contenedor a exportar */}
       <div ref={exportRef} className="flex flex-col gap-2">
 
-        {/* 🏠 CASA (optimizada móvil: tarjetas más pequeñas y rejilla adaptativa) */}
+        {/* 🏠 CASA */}
         <section
           ref={topRef}
-          className="bg-neutral-800 rounded-xl p-2"
-          style={{ touchAction: 'none' }}
+          className="bg-neutral-800 rounded-xl p-2 overflow-y-auto max-h-[40vh]"
+          style={{ touchAction: 'pan-y' }}
         >
           <Header title="🏠 En casa" count={atHome.length} />
           <StripGrid players={atHome} onPointerDown={onPointerDown} />
         </section>
 
-        {/* ⚽ CAMPO (mismo ancho; más alto) */}
+        {/* ⚽ CAMPO */}
         <main className="flex-1 flex items-center justify-center">
           <div
             ref={fieldRef}
@@ -196,11 +188,11 @@ export default function App() {
           </div>
         </main>
 
-        {/* 🪑 BANQUILLO (igual que casa) */}
+        {/* 🪑 BANQUILLO */}
         <section
           ref={botRef}
-          className="bg-neutral-800 rounded-xl p-2"
-          style={{ touchAction: 'none' }}
+          className="bg-neutral-800 rounded-xl p-2 overflow-y-auto max-h-[40vh]"
+          style={{ touchAction: 'pan-y' }}
         >
           <Header title="🪑 Banquillo" count={onBench.length} />
           <StripGrid players={onBench} onPointerDown={onPointerDown} />
@@ -220,7 +212,6 @@ function Header({ title, count }) {
   );
 }
 
-// Rejilla compacta y responsive para móvil
 function StripGrid({ players, onPointerDown }) {
   return (
     <div className="grid grid-cols-4 xs:grid-cols-5 sm:grid-cols-6 gap-2 sm:gap-3">

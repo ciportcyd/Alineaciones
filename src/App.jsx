@@ -1,27 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 
+// Nombres de archivos en /public/jugadores/*.png
 const NAMES = [
   "AITOR","ALVARO","BELOPE","CUESTA","EIZAN","GABI","HIDALGO","IZAN",
   "JASON","JOSE MCO","KAI","LUCA","LUCAS","LUCASP","MARCOS","NASA",
   "PABLO","RAUL","RIOJA ED","ROBER","ROMO","RUBEN","SAUL","SULI","VIGO MC",
 ];
 
+// Todos en casa por defecto (si no hay guardado)
 const makePlayers = () =>
   NAMES.map((name, i) => ({
     id: i + 1,
     name,
     img: `/jugadores/${encodeURIComponent(name)}.png`,
-    area: "home",
+    area: "home", // "home" | "bench" | "field"
     x: 120,
     y: 120,
   }));
 
 export default function App() {
   const fieldRef  = useRef(null);
-  const topRef    = useRef(null);
-  const botRef    = useRef(null);
-  const exportRef = useRef(null);
+  const topRef    = useRef(null);   // casa
+  const botRef    = useRef(null);   // banquillo
+  const exportRef = useRef(null);   // contenedor a exportar
 
   const [players, setPlayers] = useState(() => {
     const saved = localStorage.getItem("alineacion-v3");
@@ -32,101 +34,47 @@ export default function App() {
     localStorage.setItem("alineacion-v3", JSON.stringify(players));
   }, [players]);
 
-  // ---- Drag state (con long-press en paneles) ----
-  const drag = useRef({
-    id: null,
-    dx: 0,
-    dy: 0,
-    started: false,
-    timer: null,
-    startX: 0,
-    startY: 0,
-  });
-  const LONG_PRESS_MS = 250;
-  const CANCEL_MOVE_PX = 10;
+  // -------- DRAG (pointer events) --------
+  const drag = useRef({ id: null, dx: 0, dy: 0 });
 
   function onPointerDown(e, id) {
+    e.preventDefault(); // arrastre inmediato, sin scroll en paneles
     const p = players.find(x => x.id === id);
-    if (!p) return;
+    drag.current.id = id;
 
-    // Si está en CAMPO: drag inmediato
     if (p.area === "field" && fieldRef.current) {
-      e.preventDefault();
       const rect = fieldRef.current.getBoundingClientRect();
-      drag.current = {
-        id,
-        dx: e.clientX - (rect.left + p.x),
-        dy: e.clientY - (rect.top  + p.y),
-        started: true,
-        timer: null,
-        startX: e.clientX,
-        startY: e.clientY,
-      };
-      e.currentTarget.setPointerCapture?.(e.pointerId);
-      return;
+      drag.current.dx = e.clientX - (rect.left + p.x);
+      drag.current.dy = e.clientY - (rect.top  + p.y);
+    } else {
+      drag.current.dx = 0;
+      drag.current.dy = 0;
     }
-
-    // Si está en panel (CASA/BANQUILLO): NO prevenimos por defecto (para permitir scroll).
-    drag.current = {
-      id: null,       // aún no “agarramos” al jugador; se activa tras long-press
-      dx: 0,
-      dy: 0,
-      started: false,
-      startX: e.clientX,
-      startY: e.clientY,
-      timer: window.setTimeout(() => {
-        // activa el drag desde panel tras mantener pulsado
-        drag.current.id = id;
-        drag.current.started = true;
-      }, LONG_PRESS_MS),
-    };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
   }
 
   function onPointerMove(e) {
-    // Si todavía no empezó (antes del long-press), cancela si el dedo se mueve (scroll natural)
-    if (!drag.current.started && drag.current.timer) {
-      const dx = Math.abs(e.clientX - drag.current.startX);
-      const dy = Math.abs(e.clientY - drag.current.startY);
-      if (dx > CANCEL_MOVE_PX || dy > CANCEL_MOVE_PX) {
-        clearTimeout(drag.current.timer);
-        drag.current.timer = null; // el usuario está haciendo scroll, no drag
-      }
-      return;
-    }
-
-    // Movimiento en CAMPO (drag vivo)
     const id = drag.current.id;
     if (!id) return;
     const target = players.find(p => p.id === id);
-    if (!target || target.area !== "field") return;
+    if (target.area !== "field") return;
 
     const rect = fieldRef.current.getBoundingClientRect();
     const CARD_W = 90, CARD_H = 112;
 
     let x = e.clientX - rect.left - drag.current.dx;
     let y = e.clientY - rect.top  - drag.current.dy;
+
     x = Math.max(0, Math.min(x, rect.width  - CARD_W));
     y = Math.max(0, Math.min(y, rect.height - CARD_H));
 
     setPlayers(prev => prev.map(p => p.id === id ? ({ ...p, x, y }) : p));
   }
 
-  function clearTimer() {
-    if (drag.current.timer) {
-      clearTimeout(drag.current.timer);
-      drag.current.timer = null;
-    }
-  }
-
   function finishDrag(e) {
-    // si no llegó a comenzar (no hubo long-press), no hacemos nada
-    if (!drag.current.started) { clearTimer(); return; }
-
     const id = drag.current.id;
-    clearTimer();
-    drag.current.started = false;
-
     if (!id) return;
+    drag.current.id = null;
 
     const pt = { x: e.clientX, y: e.clientY };
     const inField = inside(pt, fieldRef.current);
@@ -146,14 +94,12 @@ export default function App() {
     } else if (inBot) {
       setPlayers(prev => prev.map(p => p.id === id ? ({ ...p, area: "bench" }) : p));
     }
-
-    drag.current.id = null;
   }
 
-  // Listeners globales para terminar drag aunque sueltes fuera
+  // Detectar soltar aunque termines fuera
   useEffect(() => {
     const up = (e) => finishDrag(e);
-    const cancel = (e) => { clearTimer(); drag.current.started = false; drag.current.id = null; };
+    const cancel = () => { drag.current.id = null; };
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
     return () => {
@@ -172,7 +118,7 @@ export default function App() {
   const onBench = players.filter(p => p.area === "bench");
   const atHome  = players.filter(p => p.area === "home");
 
-  // Exportar PNG (con fecha)
+  // Exportar PNG con fecha
   async function exportPNG() {
     const canvas = await html2canvas(exportRef.current, {
       backgroundColor: "#0f0f0f",
@@ -185,6 +131,7 @@ export default function App() {
     link.click();
   }
 
+  // Enviar todos a casa
   function sendAllHome() {
     setPlayers(prev => prev.map(p => ({ ...p, area: "home" })));
   }
@@ -208,19 +155,20 @@ export default function App() {
         </button>
       </div>
 
+      {/* Contenedor exportable: CASA + CAMPO + BANQUILLO */}
       <div ref={exportRef} className="flex flex-col gap-2">
 
-        {/* 🏠 CASA — scroll suave */}
+        {/* 🏠 CASA — SIN SCROLL, todos visibles y arrastre directo */}
         <section
           ref={topRef}
-          className="bg-neutral-800 rounded-xl p-2 overflow-y-auto max-h-[38vh]"
-          style={{ touchAction: 'pan-y' }}
+          className="bg-neutral-800 rounded-xl p-2"
+          style={{ touchAction: 'none' }} // bloquea scroll para permitir drag directo
         >
           <Header title="🏠 En casa" count={atHome.length} />
           <StripGrid players={atHome} onPointerDown={onPointerDown} />
         </section>
 
-        {/* ⚽ CAMPO */}
+        {/* ⚽ CAMPO (mismo ancho; más alto) */}
         <main className="flex-1 flex items-center justify-center">
           <div
             ref={fieldRef}
@@ -246,11 +194,11 @@ export default function App() {
           </div>
         </main>
 
-        {/* 🪑 BANQUILLO — scroll suave */}
+        {/* 🪑 BANQUILLO — SIN SCROLL, todos visibles y arrastre directo */}
         <section
           ref={botRef}
-          className="bg-neutral-800 rounded-xl p-2 overflow-y-auto max-h-[38vh]"
-          style={{ touchAction: 'pan-y' }}
+          className="bg-neutral-800 rounded-xl p-2"
+          style={{ touchAction: 'none' }} // bloquea scroll para permitir drag directo
         >
           <Header title="🪑 Banquillo" count={onBench.length} />
           <StripGrid players={onBench} onPointerDown={onPointerDown} />
@@ -270,14 +218,16 @@ function Header({ title, count }) {
   );
 }
 
-// Rejilla más densa para ver más jugadores sin hacer tanto scroll
+// Rejilla compacta (mucha densidad) para verlos TODOS sin scroll
 function StripGrid({ players, onPointerDown }) {
+  // Mucha densidad horizontal y vertical.
+  // Ajusta w-12 / w-14 si quieres aún más pequeño/grande.
   return (
-    <div className="grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 gap-2 sm:gap-3">
+    <div className="grid grid-cols-7 sm:grid-cols-9 md:grid-cols-10 lg:grid-cols-12 gap-2">
       {players.map(p => (
         <div
           key={p.id}
-          className="bg-neutral-700 rounded-lg p-1 sm:p-2 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing"
+          className="bg-neutral-700 rounded-lg p-1 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing touch-none"
           onPointerDown={(e) => onPointerDown(e, p.id)}
           title={p.name}
         >

@@ -32,46 +32,101 @@ export default function App() {
     localStorage.setItem("alineacion-v3", JSON.stringify(players));
   }, [players]);
 
-  const drag = useRef({ id: null, dx: 0, dy: 0 });
+  // ---- Drag state (con long-press en paneles) ----
+  const drag = useRef({
+    id: null,
+    dx: 0,
+    dy: 0,
+    started: false,
+    timer: null,
+    startX: 0,
+    startY: 0,
+  });
+  const LONG_PRESS_MS = 250;
+  const CANCEL_MOVE_PX = 10;
 
   function onPointerDown(e, id) {
-    e.preventDefault();
     const p = players.find(x => x.id === id);
-    drag.current.id = id;
+    if (!p) return;
 
+    // Si está en CAMPO: drag inmediato
     if (p.area === "field" && fieldRef.current) {
+      e.preventDefault();
       const rect = fieldRef.current.getBoundingClientRect();
-      drag.current.dx = e.clientX - (rect.left + p.x);
-      drag.current.dy = e.clientY - (rect.top  + p.y);
-    } else {
-      drag.current.dx = 0;
-      drag.current.dy = 0;
+      drag.current = {
+        id,
+        dx: e.clientX - (rect.left + p.x),
+        dy: e.clientY - (rect.top  + p.y),
+        started: true,
+        timer: null,
+        startX: e.clientX,
+        startY: e.clientY,
+      };
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      return;
     }
-    e.currentTarget.setPointerCapture?.(e.pointerId);
+
+    // Si está en panel (CASA/BANQUILLO): NO prevenimos por defecto (para permitir scroll).
+    drag.current = {
+      id: null,       // aún no “agarramos” al jugador; se activa tras long-press
+      dx: 0,
+      dy: 0,
+      started: false,
+      startX: e.clientX,
+      startY: e.clientY,
+      timer: window.setTimeout(() => {
+        // activa el drag desde panel tras mantener pulsado
+        drag.current.id = id;
+        drag.current.started = true;
+      }, LONG_PRESS_MS),
+    };
   }
 
   function onPointerMove(e) {
+    // Si todavía no empezó (antes del long-press), cancela si el dedo se mueve (scroll natural)
+    if (!drag.current.started && drag.current.timer) {
+      const dx = Math.abs(e.clientX - drag.current.startX);
+      const dy = Math.abs(e.clientY - drag.current.startY);
+      if (dx > CANCEL_MOVE_PX || dy > CANCEL_MOVE_PX) {
+        clearTimeout(drag.current.timer);
+        drag.current.timer = null; // el usuario está haciendo scroll, no drag
+      }
+      return;
+    }
+
+    // Movimiento en CAMPO (drag vivo)
     const id = drag.current.id;
     if (!id) return;
     const target = players.find(p => p.id === id);
-    if (target.area !== "field") return;
+    if (!target || target.area !== "field") return;
 
     const rect = fieldRef.current.getBoundingClientRect();
     const CARD_W = 90, CARD_H = 112;
 
     let x = e.clientX - rect.left - drag.current.dx;
     let y = e.clientY - rect.top  - drag.current.dy;
-
     x = Math.max(0, Math.min(x, rect.width  - CARD_W));
     y = Math.max(0, Math.min(y, rect.height - CARD_H));
 
     setPlayers(prev => prev.map(p => p.id === id ? ({ ...p, x, y }) : p));
   }
 
+  function clearTimer() {
+    if (drag.current.timer) {
+      clearTimeout(drag.current.timer);
+      drag.current.timer = null;
+    }
+  }
+
   function finishDrag(e) {
+    // si no llegó a comenzar (no hubo long-press), no hacemos nada
+    if (!drag.current.started) { clearTimer(); return; }
+
     const id = drag.current.id;
+    clearTimer();
+    drag.current.started = false;
+
     if (!id) return;
-    drag.current.id = null;
 
     const pt = { x: e.clientX, y: e.clientY };
     const inField = inside(pt, fieldRef.current);
@@ -91,11 +146,14 @@ export default function App() {
     } else if (inBot) {
       setPlayers(prev => prev.map(p => p.id === id ? ({ ...p, area: "bench" }) : p));
     }
+
+    drag.current.id = null;
   }
 
+  // Listeners globales para terminar drag aunque sueltes fuera
   useEffect(() => {
     const up = (e) => finishDrag(e);
-    const cancel = (e) => finishDrag(e);
+    const cancel = (e) => { clearTimer(); drag.current.started = false; drag.current.id = null; };
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
     return () => {
@@ -114,6 +172,7 @@ export default function App() {
   const onBench = players.filter(p => p.area === "bench");
   const atHome  = players.filter(p => p.area === "home");
 
+  // Exportar PNG (con fecha)
   async function exportPNG() {
     const canvas = await html2canvas(exportRef.current, {
       backgroundColor: "#0f0f0f",
@@ -131,7 +190,7 @@ export default function App() {
   }
 
   return (
-    <div className="w-screen min-h-screen bg-neutral-900 text-white flex flex-col gap-2 p-2">
+    <div className="w-screen min-h-screen bg-neutral-900 text-white flex flex-col gap-2 p-2" onPointerMove={onPointerMove}>
 
       {/* Barra de acciones */}
       <div className="flex gap-2 justify-end">
@@ -151,10 +210,10 @@ export default function App() {
 
       <div ref={exportRef} className="flex flex-col gap-2">
 
-        {/* 🏠 CASA */}
+        {/* 🏠 CASA — scroll suave */}
         <section
           ref={topRef}
-          className="bg-neutral-800 rounded-xl p-2 overflow-y-auto max-h-[40vh]"
+          className="bg-neutral-800 rounded-xl p-2 overflow-y-auto max-h-[38vh]"
           style={{ touchAction: 'pan-y' }}
         >
           <Header title="🏠 En casa" count={atHome.length} />
@@ -167,7 +226,6 @@ export default function App() {
             ref={fieldRef}
             className="relative w-full max-w-[360px] sm:max-w-[420px] md:max-w-[480px] aspect-[9/20] bg-cover bg-center bg-no-repeat touch-none"
             style={{ backgroundImage: "url('/campo.png')" }}
-            onPointerMove={onPointerMove}
           >
             {onField.map(p => (
               <div
@@ -188,10 +246,10 @@ export default function App() {
           </div>
         </main>
 
-        {/* 🪑 BANQUILLO */}
+        {/* 🪑 BANQUILLO — scroll suave */}
         <section
           ref={botRef}
-          className="bg-neutral-800 rounded-xl p-2 overflow-y-auto max-h-[40vh]"
+          className="bg-neutral-800 rounded-xl p-2 overflow-y-auto max-h-[38vh]"
           style={{ touchAction: 'pan-y' }}
         >
           <Header title="🪑 Banquillo" count={onBench.length} />
@@ -212,20 +270,21 @@ function Header({ title, count }) {
   );
 }
 
+// Rejilla más densa para ver más jugadores sin hacer tanto scroll
 function StripGrid({ players, onPointerDown }) {
   return (
-    <div className="grid grid-cols-4 xs:grid-cols-5 sm:grid-cols-6 gap-2 sm:gap-3">
+    <div className="grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 gap-2 sm:gap-3">
       {players.map(p => (
         <div
           key={p.id}
-          className="bg-neutral-700 rounded-lg p-1 sm:p-2 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing touch-none"
+          className="bg-neutral-700 rounded-lg p-1 sm:p-2 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing"
           onPointerDown={(e) => onPointerDown(e, p.id)}
           title={p.name}
         >
           <img
             src={p.img}
             alt={p.name}
-            className="w-14 sm:w-16 md:w-20 h-auto pointer-events-none select-none"
+            className="w-12 sm:w-14 md:w-16 h-auto pointer-events-none select-none"
             draggable={false}
             onError={(e)=>{ e.currentTarget.style.opacity = 0.3; }}
           />

@@ -8,7 +8,7 @@ const NAMES = [
   "PABLO","RAUL","RIOJA ED","ROBER","ROMO","RUBEN","SAUL","SULI","VIGO MC",
 ];
 
-/** Crea jugadores: por defecto “home” (si no hay guardado) */
+/** Crea jugadores (si no hay guardado) */
 const makePlayers = () =>
   NAMES.map((name, i) => ({
     id: i + 1,
@@ -19,22 +19,19 @@ const makePlayers = () =>
     y: 120,
   }));
 
-/** Plantilla por filas (como en tu foto): 5 filas de arriba a abajo.
- *  Reparte a TODOS en orden, de izquierda a derecha, en estas filas.
- *  Si quieres otras cantidades por fila, cambia ROW_COUNTS.
- */
+/** Plantilla por filas (como tu foto): 5 filas de arriba a abajo. */
 const ROW_COUNTS = [5, 5, 5, 5, 4]; // total 24
 const ROW_Y = [0.08, 0.28, 0.48, 0.68, 0.86]; // altura (0..1) de cada fila
 
-// tamaño aprox de tarjeta cuando está en el campo (para centrar)
+// tamaño aprox de la “tarjeta” en el campo
 const CARD_W = 90;
 const CARD_H = 112;
 
 export default function App() {
   const fieldRef  = useRef(null);
-  const topRef    = useRef(null);
-  const botRef    = useRef(null);
-  const exportRef = useRef(null);
+  const topRef    = useRef(null);   // casa
+  const botRef    = useRef(null);   // banquillo
+  const exportRef = useRef(null);   // contenedor a exportar
 
   const [players, setPlayers] = useState(() => {
     const saved = localStorage.getItem("alineacion-v3");
@@ -45,11 +42,14 @@ export default function App() {
     localStorage.setItem("alineacion-v3", JSON.stringify(players));
   }, [players]);
 
-  /** DRAG */
+  // -------- DRAG (pointer events) --------
   const drag = useRef({ id: null, dx: 0, dy: 0 });
 
   function onPointerDown(e, id) {
-    e.preventDefault(); // arrastre inmediato
+    // Para permitir scroll sobre el campo cuando NO se toca un jugador,
+    // solo prevenimos por defecto si estamos empezando un drag sobre una tarjeta.
+    e.preventDefault();
+
     const p = players.find(x => x.id === id);
     drag.current.id = id;
 
@@ -105,6 +105,7 @@ export default function App() {
     }
   }
 
+  // Detectar soltar aunque termines fuera
   useEffect(() => {
     const up = (e) => finishDrag(e);
     const cancel = () => { drag.current.id = null; };
@@ -131,12 +132,11 @@ export default function App() {
     if (!fieldRef.current) return;
     const rect = fieldRef.current.getBoundingClientRect();
 
-    // Márgenes laterales para que no queden pegados al borde
+    // márgenes laterales para que no queden pegados al borde
     const leftMargin = 0.06 * rect.width;
     const rightMargin = 0.06 * rect.width;
     const usableWidth = rect.width - leftMargin - rightMargin;
 
-    // Reparte N jugadores por filas según ROW_COUNTS
     const newPlayers = [...players];
     let idx = 0;
 
@@ -144,7 +144,6 @@ export default function App() {
       const y = ROW_Y[rowIndex] * (rect.height - CARD_H);
       if (perRow <= 0) return;
 
-      // espacios horizontales equidistantes
       for (let i = 0; i < perRow && idx < newPlayers.length; i++, idx++) {
         const t = perRow === 1 ? 0.5 : i / (perRow - 1); // 0..1
         const x = leftMargin + t * usableWidth - CARD_W / 2;
@@ -157,7 +156,7 @@ export default function App() {
       }
     });
 
-    // Si sobran jugadores (más que el total de la plantilla), colócalos al final abajo
+    // Si sobran jugadores (más que las filas), colócalos al final abajo
     while (idx < newPlayers.length) {
       const x = leftMargin + (Math.random() * usableWidth) - CARD_W / 2;
       const y = 0.92 * (rect.height - CARD_H);
@@ -173,11 +172,10 @@ export default function App() {
     setPlayers(newPlayers);
   }
 
-  /** Al cargar por primera vez, si no hay guardado, pon plantilla en campo */
+  /** Al cargar por primera vez, si no hay guardado, poner plantilla en campo */
   useEffect(() => {
     const saved = localStorage.getItem("alineacion-v3");
     if (!saved) {
-      // Espera a que el campo tenga su tamaño
       requestAnimationFrame(() => placeAllToFieldGrid());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -200,6 +198,7 @@ export default function App() {
     <div
       className="w-screen min-h-screen bg-neutral-900 text-white flex flex-col gap-2 p-2"
       onPointerMove={onPointerMove}
+      style={{ touchAction: 'pan-y' }} // permite scroll vertical global en móvil
     >
       {/* Barra de acciones */}
       <div className="flex gap-2 justify-end flex-wrap">
@@ -220,7 +219,7 @@ export default function App() {
       {/* Exportable: CASA + CAMPO + BANQUILLO */}
       <div ref={exportRef} className="flex flex-col gap-2">
 
-        {/* 🏠 CASA (sin scroll, visible todo) */}
+        {/* 🏠 CASA — SIN SCROLL, todos visibles y drag directo */}
         <section
           ref={topRef}
           className="bg-neutral-800 rounded-xl p-2"
@@ -230,12 +229,15 @@ export default function App() {
           <StripGrid players={atHome} onPointerDown={onPointerDown} />
         </section>
 
-        {/* ⚽ CAMPO (mismo ancho; más alto) */}
+        {/* ⚽ CAMPO — MISMO ANCHO, MÁS ALTO, y **permite scroll al tocar fondo** */}
         <main className="flex-1 flex items-center justify-center">
           <div
             ref={fieldRef}
-            className="relative w-full max-w-[360px] sm:max-w-[420px] md:max-w-[480px] aspect-[9/20] bg-cover bg-center bg-no-repeat touch-none"
-            style={{ backgroundImage: "url('/campo.png')" }}
+            className="relative w-full max-w-[360px] sm:max-w-[420px] md:max-w-[480px] aspect-[9/20] bg-cover bg-center bg-no-repeat select-none"
+            style={{
+              backgroundImage: "url('/campo.png')",
+              touchAction: 'pan-y', // <- clave: scroll vertical sobre el campo si no agarras una tarjeta
+            }}
           >
             {onField.map(p => (
               <div
@@ -256,7 +258,7 @@ export default function App() {
           </div>
         </main>
 
-        {/* 🪑 BANQUILLO (sin scroll, visible todo) */}
+        {/* 🪑 BANQUILLO — SIN SCROLL, todos visibles y drag directo */}
         <section
           ref={botRef}
           className="bg-neutral-800 rounded-xl p-2"
@@ -280,7 +282,7 @@ function Header({ title, count }) {
   );
 }
 
-/** Rejilla densa para ver TODOS a la vez */
+/** Rejilla densa para ver TODOS a la vez (sin scroll) */
 function StripGrid({ players, onPointerDown }) {
   return (
     <div className="grid grid-cols-7 sm:grid-cols-9 md:grid-cols-10 lg:grid-cols-12 gap-2">
@@ -309,3 +311,4 @@ function StripGrid({ players, onPointerDown }) {
 
 /** Helpers */
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
